@@ -720,10 +720,12 @@ void linenoiseHide(struct linenoiseState_s *l) {
         refreshMultiLine(l,REFRESH_CLEAN);
     else
         refreshSingleLine(l,REFRESH_CLEAN);
+    disableRawMode(l, l->ifd);
 }
 
 /* Show the current line, when using the multiplexing API. */
 void linenoiseShow(struct linenoiseState_s *l) {
+    enableRawMode(l, l->ifd);
     if (l->in_completion) {
         refreshLineWithCompletion(l,NULL,REFRESH_WRITE);
     } else {
