@@ -614,7 +614,7 @@ static void refreshMultiLine(struct linenoiseState_s *l, int flags) {
     int rpos2; /* rpos after refresh. */
     int col; /* colum position, zero-based. */
     size_t old_rows = l->oldrows;
-    int fd = l->ofd, j;
+    int fd = l->ofd;
     struct abuf ab;
 
     l->oldrows = rows;
@@ -631,7 +631,7 @@ static void refreshMultiLine(struct linenoiseState_s *l, int flags) {
         }
 
         /* Now for every row clear it, go up. */
-        for (j = 0; j < old_rows-1; j++) {
+        for (size_t j = 0; j < old_rows-1; j++) {
             lndebug("clear+up");
             snprintf(seq,64,"\r\x1b[0K\x1b[1A");
             abAppend(&ab,seq,strlen(seq));
