@@ -1,13 +1,36 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/select.h>
+#include <poll.h>
+#include <termios.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <errno.h>
 #include "linenoise.h"
 
-void completion(const char *buf, linenoiseCompletions *lc) {
+static struct termios orig_term = {};
+
+static void *thread_main(void *arg)
+{
+    int pipe_read = *(int*)arg;
+    printf("thread started\n");
+
+    for(;;) {
+        sleep(2);
+        printf("aaa\n");
+    }
+
+    return 0;
+}
+
+void completion(const char *buf, linenoiseCompletions lc) {
     if (buf[0] == 'h') {
         linenoiseAddCompletion(lc,"hello");
         linenoiseAddCompletion(lc,"hello there");
+    } else if (buf[0] == '\0') {
+        linenoiseAddCompletion(lc,"allll");
     }
 }
 
@@ -21,104 +44,118 @@ char *hints(const char *buf, int *color, int *bold) {
 }
 
 int main(int argc, char **argv) {
-    char *line;
-    char *prgname = argv[0];
-    int async = 0;
 
-    /* Parse options, with --multiline we enable multi line editing. */
-    while(argc > 1) {
-        argc--;
-        argv++;
-        if (!strcmp(*argv,"--multiline")) {
-            linenoiseSetMultiLine(1);
-            printf("Multi-line mode enabled.\n");
-        } else if (!strcmp(*argv,"--keycodes")) {
-            linenoisePrintKeyCodes();
-            exit(0);
-        } else if (!strcmp(*argv,"--async")) {
-            async = 1;
-        } else {
-            fprintf(stderr, "Usage: %s [--multiline] [--keycodes] [--async]\n", prgname);
-            exit(1);
-        }
+    pthread_t task_to_be_cancelled_hdl;
+
+    pthread_attr_t attr;
+    int ret = pthread_attr_init(&attr);
+    if (ret != 0) {
+        printf("pthread_attr_init() failed: %s\n", strerror(errno));
     }
 
+    int thread_pipe[2];
+    ret = pipe(thread_pipe);
+    if (ret != 0) {
+        printf("pipe() failed: %s\n", strerror(errno));
+    }
+
+    // read end non-blocking
+    ret = fcntl(thread_pipe[0], F_SETFL, fcntl(thread_pipe[0], F_GETFL, 0) | O_NONBLOCK);
+    if (ret != 0) {
+        printf("fcntl() failed: %s\n", strerror(errno));
+    }
+    int pipe_write = thread_pipe[1];
+
+    ret = pthread_create(&task_to_be_cancelled_hdl, &attr, &thread_main, thread_pipe);
+    if (ret != 0) {
+        printf("pthread_create() failed: %s\n", strerror(errno));
+    }
+    printf("pthread created\n");
+
+    ret = pthread_attr_destroy(&attr);
+    if (ret != 0) {
+        printf("pthread_attr_destroy() failed: %s\n", strerror(errno));
+    }
+
+    sleep(1);
+
+
+
+
+    int orig_stdout = dup(STDOUT_FILENO);
+    // create new pipe and let it be the new stdout, only for background outputs from other threads,
+    // which requires special async output logic
+    int piped_stdout[2];
+    pipe(piped_stdout);
+    dup2(piped_stdout[1], STDOUT_FILENO);
+//    fcntl(piped_stdout[0], F_SETFL, fcntl(piped_stdout[0], F_GETFL) | O_NONBLOCK);
+
+    linenoiseState ls;
+    linenoiseCreateState(&ls);
     /* Set the completion callback. This will be called every time the
      * user uses the <tab> key. */
-    linenoiseSetCompletionCallback(completion);
-    linenoiseSetHintsCallback(hints);
+    linenoiseSetCompletionCallback(ls, completion);
+    linenoiseSetHintsCallback(ls, hints);
 
     /* Load history from file. The history file is just a plain text file
      * where entries are separated by newlines. */
-    linenoiseHistoryLoad("history.txt"); /* Load the history at startup */
-
-    /* Now this is the main loop of the typical linenoise-based application.
-     * The call to linenoise() will block as long as the user types something
-     * and presses enter.
-     *
-     * The typed string is returned as a malloc() allocated string by
-     * linenoise, so the user needs to free() it. */
+    linenoiseHistoryLoad(ls, "history.txt"); /* Load the history at startup */
 
     while(1) {
-        if (!async) {
-            line = linenoise("hello> ");
-            if (line == NULL) break;
-        } else {
-            /* Asynchronous mode using the multiplexing API: wait for
-             * data on stdin, and simulate async data coming from some source
-             * using the select(2) timeout. */
-            struct linenoiseState ls;
-            char buf[1024];
-            linenoiseEditStart(&ls,-1,-1,buf,sizeof(buf),"hello> ");
-            while(1) {
-		fd_set readfds;
-		struct timeval tv;
-		int retval;
-
-		FD_ZERO(&readfds);
-		FD_SET(ls.ifd, &readfds);
-		tv.tv_sec = 1; // 1 sec timeout
-		tv.tv_usec = 0;
-
-		retval = select(ls.ifd+1, &readfds, NULL, NULL, &tv);
-		if (retval == -1) {
-		    perror("select()");
-                    exit(1);
-		} else if (retval) {
-		    line = linenoiseEditFeed(&ls);
-                    /* A NULL return means: line editing is continuing.
-                     * Otherwise the user hit enter or stopped editing
-                     * (CTRL+C/D). */
-                    if (line != linenoiseEditMore) break;
-		} else {
-		    // Timeout occurred
-                    static int counter = 0;
-                    linenoiseHide(&ls);
-		    printf("Async output %d.\n", counter++);
-                    linenoiseShow(&ls);
-		}
+        char buf[1024];
+        char *line;
+        linenoiseEditStart(ls, 0, orig_stdout, buf, sizeof(buf), "hello> ");
+        while(1) {
+            struct pollfd fds[] = {
+                    {
+                            .fd = 0,
+                            .events = POLLIN,
+                    },
+                    {
+                            .fd = piped_stdout[0],
+                            .events = POLLIN,
+                    }
+            };
+            int retval = poll(fds, sizeof(fds) / sizeof(fds[0]), -1);
+            if (retval == -1) {
+                if (errno == EINTR) {
+                    break;
+                }
+                perror("poll()");
+                exit(1);
+            } else if (retval == 0) {
+                // Timeout occurred
+                static int counter = 0;
+                linenoiseHide(ls);
+                printf("Async output %d.\n", counter++);
+                linenoiseShow(ls);
+            } else {
+                if (fds[1].revents & POLLIN) {
+                    linenoiseHide(ls);
+                    // always copy amount of bytes blindly
+                    splice(piped_stdout[0], NULL, orig_stdout, NULL, 4096, SPLICE_F_NONBLOCK);
+                    linenoiseShow(ls);
+                    continue;
+                }
+                if (fds[0].revents & POLLIN) {
+                    line = linenoiseEditFeed(ls);
+                    if (line != linenoiseEditMore) {
+                        break;
+                    }
+                }
             }
-            linenoiseEditStop(&ls);
-            if (line == NULL) exit(0); /* Ctrl+D/C. */
         }
 
+        linenoiseEditStop(ls);
+        if (line == NULL) break; /* Ctrl+D/C. */
+
         /* Do something with the string. */
-        if (line[0] != '\0' && line[0] != '/') {
-            printf("echo: '%s'\n", line);
-            linenoiseHistoryAdd(line); /* Add to the history. */
-            linenoiseHistorySave("history.txt"); /* Save the history on disk. */
-        } else if (!strncmp(line,"/historylen",11)) {
-            /* The "/historylen" command will change the history len. */
-            int len = atoi(line+11);
-            linenoiseHistorySetMaxLen(len);
-        } else if (!strncmp(line, "/mask", 5)) {
-            linenoiseMaskModeEnable();
-        } else if (!strncmp(line, "/unmask", 7)) {
-            linenoiseMaskModeDisable();
-        } else if (line[0] == '/') {
-            printf("Unreconized command: %s\n", line);
+        if (line[0] != '\0') {
+            linenoiseHistoryAdd(ls, line); /* Add to the history. */
+            linenoiseHistorySave(ls, "history.txt"); /* Save the history on disk. */
         }
         free(line);
     }
+    dup2(orig_stdout, STDOUT_FILENO);
     return 0;
 }
