@@ -53,6 +53,7 @@ typedef struct linenoiseCompletions_s* linenoiseCompletions;
 struct linenoiseConfig {
     int fd_in;      /* linenoise will read from this file descriptor */
     int fd_out;     /* linenoise will write to this file descriptor */
+    int fd_tty;     /* linenoise will detect and configure this fd as console, leave -1 if not used */
     char *buf;      /* user provided line buffer, storing any unfinished user input */
     size_t buf_len; /* size of above buffer */
 };

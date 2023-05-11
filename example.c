@@ -95,6 +95,7 @@ int main(int argc, char **argv) {
     struct linenoiseConfig cfg = {
             .fd_in = 0,
             .fd_out = orig_stdout,
+            .fd_tty = 0,
             .buf = buf,
             .buf_len = sizeof(buf),
     };

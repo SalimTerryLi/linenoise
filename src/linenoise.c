@@ -137,6 +137,7 @@ struct linenoiseState_s {
     size_t completion_idx; /* Index of next completion to propose. */
     int ifd;            /* Terminal stdin file descriptor. */
     int ofd;            /* Terminal stdout file descriptor. */
+    int ttyfd;          /* separate console control fd with stdio */
     char *buf;          /* Edited line buffer. */
     size_t buflen;      /* Edited line buffer size. */
     const char *prompt; /* Prompt to display. */
@@ -238,7 +239,7 @@ void linenoiseSetMultiLine(struct linenoiseState_s *ls, int ml) {
 static int enableRawMode(struct linenoiseState_s *ls, int fd) {
     struct termios raw;
 
-    if (!isatty(ls->ifd)) goto fatal;
+    if (!isatty(fd)) goto fatal;
     if (tcgetattr(fd,&ls->orig_termios) == -1) goto fatal;
 
     raw = ls->orig_termios;  /* modify the original mode */
@@ -299,10 +300,10 @@ static int getCursorPosition(int ifd, int ofd) {
 
 /* Try to get the number of columns in the current terminal, or assume 80
  * if it fails. */
-static int getColumns(int ifd, int ofd) {
+static int getColumns(int ttyfd, int ifd, int ofd) {
     struct winsize ws;
 
-    if (ioctl(ofd, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
+    if (ioctl(ttyfd, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
         /* ioctl() failed. Try to query the terminal itself. */
         int start, cols;
 
@@ -721,7 +722,7 @@ void linenoiseHide(struct linenoiseState_s *l) {
         refreshMultiLine(l,REFRESH_CLEAN);
     else
         refreshSingleLine(l,REFRESH_CLEAN);
-    disableRawMode(l, l->ifd);
+    disableRawMode(l, l->ttyfd);
 }
 
 /* Show the current line, when using the multiplexing API. */
@@ -882,6 +883,7 @@ void linenoiseCreateState(struct linenoiseState_s **ret, const struct linenoiseC
     l->ifd = cfg->fd_in != -1 ? cfg->fd_in : STDIN_FILENO;
     l->ofd = cfg->fd_out != -1 ? cfg->fd_out : STDOUT_FILENO;
     l->ifd_file = fdopen(dup(cfg->fd_in), "r");
+    l->ttyfd = cfg->fd_tty != -1? cfg->fd_tty: l->ifd;
 
 
     l->buf = cfg->buf;
@@ -929,20 +931,20 @@ int linenoiseEditStart(struct linenoiseState_s *l, const char *prompt) {
     l->plen = strlen(prompt);
     l->oldpos = l->pos = 0;
     l->len = 0;
-    l->cols = getColumns(l->ifd, l->ofd);
+    l->cols = getColumns(l->ttyfd, l->ifd, l->ofd);
     l->oldrows = 0;
     l->history_index = 0;
 
     /* Buffer starts empty. */
     l->buf[0] = '\0';
 
-    /* If stdin is not a tty, stop here with the initialization. We
+    /* If fd is not a tty, stop here with the initialization. We
      * will actually just read a line from standard input in blocking
      * mode later, in linenoiseEditFeed(). */
-    if (!isatty(l->ifd)) return 0;
+    if (!isatty(l->ttyfd)) return 0;
 
     /* Enter raw mode. */
-    if (enableRawMode(l, l->ifd) == -1) return -1;
+    if (enableRawMode(l, l->ttyfd) == -1) return -1;
 
     /* The latest history entry is always our current buffer, that
      * initially is just an empty string. */
@@ -975,7 +977,7 @@ char *linenoiseEditMore = "If you see this, you are misusing the API: when linen
 char *linenoiseEditFeed(struct linenoiseState_s *l) {
     /* Not a TTY, pass control to line reading without character
      * count limits. */
-    if (!isatty(l->ifd)) return linenoiseNoTTY(l);
+    if (!isatty(l->ttyfd)) return linenoiseNoTTY(l);
 
     char c;
     int nread;
@@ -1138,8 +1140,8 @@ char *linenoiseEditFeed(struct linenoiseState_s *l) {
  * returns something different than NULL. At this point the user input
  * is in the buffer, and we can restore the terminal in normal mode. */
 void linenoiseEditStop(struct linenoiseState_s *l) {
-    if (!isatty(l->ifd)) return;
-    disableRawMode(l, l->ifd);
+    if (!isatty(l->ttyfd)) return;
+    disableRawMode(l, l->ttyfd);
     dprintf(l->ofd, "\n");
 }
 
@@ -1168,7 +1170,7 @@ void linenoisePrintKeyCodes(struct linenoiseState_s *l) {
         printf("\r"); /* Go left edge manually, we are in raw mode. */
         fsync(l->ofd);
     }
-    disableRawMode(l, l->ifd);
+    disableRawMode(l, l->ttyfd);
 }
 
 /* This function is called when linenoise() is called with the standard
