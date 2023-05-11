@@ -1012,8 +1012,15 @@ char *linenoiseEditFeed(struct linenoiseState_s *l) {
         }
         return strdup(l->buf);
     case CTRL_C:     /* ctrl-c */
-        errno = EAGAIN;
-        return NULL;
+        if (l->len == 0) {
+            errno = EAGAIN;
+            return NULL;
+        } else {
+            l->buf[0] = '\0';
+            l->pos = l->len = 0;
+            refreshLine(l);
+            return linenoiseEditMore;
+        }
     case BACKSPACE:   /* backspace */
     case 8:     /* ctrl-h */
         linenoiseEditBackspace(l);
