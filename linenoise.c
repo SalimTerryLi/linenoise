@@ -110,6 +110,7 @@
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
+#include <inttypes.h>
 #include <ctype.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -625,7 +626,7 @@ static void refreshMultiLine(struct linenoiseState_s *l, int flags) {
     if (flags & REFRESH_CLEAN) {
         if (old_rows-rpos > 0) {
             lndebug("go down %d", old_rows-rpos);
-            snprintf(seq,64,"\x1b[%luB", old_rows-rpos);
+            snprintf(seq,64,"\x1b[%" PRIu32 "B", (uint32_t)(old_rows-rpos));
             abAppend(&ab,seq,strlen(seq));
         }
 
