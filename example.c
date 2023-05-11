@@ -19,32 +19,14 @@ static void *thread_main(void *arg)
 
     for(;;) {
         sleep(2);
-        printf("aaa\n");
+        printf("thread spamming every two seconds...\n");
+        printf("but twice!\n");
     }
 
     return 0;
 }
 
-void completion(const char *buf, linenoiseCompletions lc) {
-    if (buf[0] == 'h') {
-        linenoiseAddCompletion(lc,"hello");
-        linenoiseAddCompletion(lc,"hello there");
-    } else if (buf[0] == '\0') {
-        linenoiseAddCompletion(lc,"allll");
-    }
-}
-
-char *hints(const char *buf, int *color, int *bold) {
-    if (!strcasecmp(buf,"hello")) {
-        *color = 35;
-        *bold = 0;
-        return " World";
-    }
-    return NULL;
-}
-
-int main(int argc, char **argv) {
-
+static void start_thread() {
     pthread_t task_to_be_cancelled_hdl;
 
     pthread_attr_t attr;
@@ -76,11 +58,30 @@ int main(int argc, char **argv) {
     if (ret != 0) {
         printf("pthread_attr_destroy() failed: %s\n", strerror(errno));
     }
+}
 
-    sleep(1);
+void completion(const char *buf, linenoiseCompletions lc) {
+    if (buf[0] == 'h') {
+        linenoiseAddCompletion(lc,"hello");
+        linenoiseAddCompletion(lc,"hello there");
+    } else if (buf[0] == '\0') {
+        linenoiseAddCompletion(lc,"allllll commands here");
+    }
+}
 
+char *hints(const char *buf, int *color, int *bold) {
+    if (!strcasecmp(buf,"hello")) {
+        *color = 35;
+        *bold = 0;
+        return " World";
+    }
+    return NULL;
+}
 
+int main(int argc, char **argv) {
 
+    // this thread will spam stdout, which triggers asnyc output handling
+    start_thread();
 
     int orig_stdout = dup(STDOUT_FILENO);
     // create new pipe and let it be the new stdout, only for background outputs from other threads,
@@ -88,7 +89,6 @@ int main(int argc, char **argv) {
     int piped_stdout[2];
     pipe(piped_stdout);
     dup2(piped_stdout[1], STDOUT_FILENO);
-//    fcntl(piped_stdout[0], F_SETFL, fcntl(piped_stdout[0], F_GETFL) | O_NONBLOCK);
 
     linenoiseState ls;
     char buf[1024];
@@ -160,11 +160,16 @@ int main(int argc, char **argv) {
         if (line[0] != '\0') {
             linenoiseHistoryAdd(ls, line); /* Add to the history. */
             linenoiseHistorySave(ls, "history.txt"); /* Save the history on disk. */
+
+            printf("User Inputs: %s\n", line);
         }
         free(line);
     }
 
     linenoiseDeleteState(ls);
     dup2(orig_stdout, STDOUT_FILENO);
+    close(piped_stdout[1]); // [0] is closed by dup2()
+    close(orig_stdout);
+
     return 0;
 }
