@@ -931,7 +931,7 @@ int linenoiseEditStart(struct linenoiseState_s *l, const char *prompt) {
     l->plen = strlen(prompt);
     l->oldpos = l->pos = 0;
     l->len = 0;
-    l->cols = getColumns(l->ttyfd, l->ifd, l->ofd);
+    l->cols = 80;
     l->oldrows = 0;
     l->history_index = 0;
 
@@ -941,7 +941,12 @@ int linenoiseEditStart(struct linenoiseState_s *l, const char *prompt) {
     /* If fd is not a tty, stop here with the initialization. We
      * will actually just read a line from standard input in blocking
      * mode later, in linenoiseEditFeed(). */
-    if (!isatty(l->ttyfd)) return 0;
+    if (!isatty(l->ttyfd)) {
+        if (write(l->ofd,prompt,l->plen) == -1) return -1;
+        return 0;
+    };
+
+    l->cols = getColumns(l->ttyfd, l->ifd, l->ofd);
 
     /* Enter raw mode. */
     if (enableRawMode(l, l->ttyfd) == -1) return -1;
@@ -1201,6 +1206,9 @@ static char *linenoiseNoTTY(struct linenoiseState_s *l) {
             }
         }
         int c = fgetc(l->ifd_file);
+        if (c == 0) {
+            continue;
+        }
         if (c == EOF || c == '\n') {
             if (c == EOF && len == 0) {
                 free(line);
