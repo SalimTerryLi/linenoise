@@ -50,9 +50,17 @@ extern char *linenoiseEditMore;
 typedef struct linenoiseState_s* linenoiseState;
 typedef struct linenoiseCompletions_s* linenoiseCompletions;
 
+struct linenoiseConfig {
+    int fd_in;      /* linenoise will read from this file descriptor */
+    int fd_out;     /* linenoise will write to this file descriptor */
+    char *buf;      /* user provided line buffer, storing any unfinished user input */
+    size_t buf_len; /* size of above buffer */
+};
+
 /* Non blocking API. */
-void linenoiseCreateState(struct linenoiseState_s **ret);
-int linenoiseEditStart(linenoiseState l, int stdin_fd, int stdout_fd, char *buf, size_t buflen, const char *prompt);
+void linenoiseCreateState(linenoiseState *l, const struct linenoiseConfig *cfg);
+void linenoiseDeleteState(linenoiseState l);
+int linenoiseEditStart(struct linenoiseState_s *l, const char *prompt);
 char *linenoiseEditFeed(linenoiseState l);
 void linenoiseEditStop(linenoiseState l);
 void linenoiseHide(linenoiseState l);

@@ -864,9 +864,9 @@ void linenoiseEditDeletePrevWord(struct linenoiseState_s *l) {
  * This function should be called to populate the internal state before
  * further usages.
  *
- * must be freed after use
+ * should be passed to linenoiseDeleteState() after use
  */
-void linenoiseCreateState(struct linenoiseState_s **ret) {
+void linenoiseCreateState(struct linenoiseState_s **ret, const struct linenoiseConfig *cfg) {
     struct linenoiseState_s *l = malloc(sizeof(struct linenoiseState_s));
     l->maskmode = 0;
     l->rawmode = 0;
@@ -879,9 +879,22 @@ void linenoiseCreateState(struct linenoiseState_s **ret) {
     l->hintsCallback = NULL;
     l->freeHintsCallback = NULL;
 
-    l->ifd_file = NULL;
+    l->ifd = cfg->fd_in != -1 ? cfg->fd_in : STDIN_FILENO;
+    l->ofd = cfg->fd_out != -1 ? cfg->fd_out : STDOUT_FILENO;
+    l->ifd_file = fdopen(dup(cfg->fd_in), "r");
+
+
+    l->buf = cfg->buf;
+    l->buflen = cfg->buf_len;
+    l->buflen--; /* Make sure there is always space for the nulterm */
 
     *ret = l;
+}
+
+
+void linenoiseDeleteState(linenoiseState l) {
+    fclose(l->ifd_file);
+    free(l);
 }
 
 /* This function is part of the multiplexed API of Linenoise, that is used
@@ -908,25 +921,20 @@ void linenoiseCreateState(struct linenoiseState_s **ret) {
  * fails. If stdin_fd or stdout_fd are set to -1, the default is to use
  * STDIN_FILENO and STDOUT_FILENO.
  */
-int linenoiseEditStart(struct linenoiseState_s *l, int stdin_fd, int stdout_fd, char *buf, size_t buflen, const char *prompt) {
+int linenoiseEditStart(struct linenoiseState_s *l, const char *prompt) {
     /* Populate the linenoise state that we pass to functions implementing
      * specific editing functionalities. */
     l->in_completion = 0;
-    l->ifd = stdin_fd != -1 ? stdin_fd : STDIN_FILENO;
-    l->ofd = stdout_fd != -1 ? stdout_fd : STDOUT_FILENO;
-    l->buf = buf;
-    l->buflen = buflen;
     l->prompt = prompt;
     l->plen = strlen(prompt);
     l->oldpos = l->pos = 0;
     l->len = 0;
-    l->cols = getColumns(stdin_fd, stdout_fd);
+    l->cols = getColumns(l->ifd, l->ofd);
     l->oldrows = 0;
     l->history_index = 0;
 
     /* Buffer starts empty. */
     l->buf[0] = '\0';
-    l->buflen--; /* Make sure there is always space for the nulterm */
 
     /* If stdin is not a tty, stop here with the initialization. We
      * will actually just read a line from standard input in blocking
@@ -1182,9 +1190,6 @@ static char *linenoiseNoTTY(struct linenoiseState_s *l) {
                 if (oldval) free(oldval);
                 return NULL;
             }
-        }
-        if (l->ifd_file == NULL) {
-            l->ifd_file = fdopen(l->ifd, "r");
         }
         int c = fgetc(l->ifd_file);
         if (c == EOF || c == '\n') {

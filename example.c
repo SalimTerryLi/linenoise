@@ -91,7 +91,14 @@ int main(int argc, char **argv) {
 //    fcntl(piped_stdout[0], F_SETFL, fcntl(piped_stdout[0], F_GETFL) | O_NONBLOCK);
 
     linenoiseState ls;
-    linenoiseCreateState(&ls);
+    char buf[1024];
+    struct linenoiseConfig cfg = {
+            .fd_in = 0,
+            .fd_out = orig_stdout,
+            .buf = buf,
+            .buf_len = sizeof(buf),
+    };
+    linenoiseCreateState(&ls, &cfg);
     /* Set the completion callback. This will be called every time the
      * user uses the <tab> key. */
     linenoiseSetCompletionCallback(ls, completion);
@@ -102,9 +109,8 @@ int main(int argc, char **argv) {
     linenoiseHistoryLoad(ls, "history.txt"); /* Load the history at startup */
 
     while(1) {
-        char buf[1024];
         char *line;
-        linenoiseEditStart(ls, 0, orig_stdout, buf, sizeof(buf), "hello> ");
+        linenoiseEditStart(ls, "hello> ");
         while(1) {
             struct pollfd fds[] = {
                     {
@@ -156,6 +162,8 @@ int main(int argc, char **argv) {
         }
         free(line);
     }
+
+    linenoiseDeleteState(ls);
     dup2(orig_stdout, STDOUT_FILENO);
     return 0;
 }

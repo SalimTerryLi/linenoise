@@ -1,3 +1,4 @@
 *.dSYM
 history.txt
 /build
+/.idea
