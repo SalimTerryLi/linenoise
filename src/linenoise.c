@@ -160,8 +160,6 @@ struct linenoiseState_s {
     linenoiseCompletionCallback *completionCallback;
     linenoiseHintsCallback *hintsCallback;
     linenoiseFreeHintsCallback *freeHintsCallback;
-
-    FILE* ifd_file;
 };
 
 static char *linenoiseNoTTY(struct linenoiseState_s *l);
@@ -882,7 +880,6 @@ void linenoiseCreateState(struct linenoiseState_s **ret, const struct linenoiseC
 
     l->ifd = cfg->fd_in != -1 ? cfg->fd_in : STDIN_FILENO;
     l->ofd = cfg->fd_out != -1 ? cfg->fd_out : STDOUT_FILENO;
-    l->ifd_file = fdopen(dup(cfg->fd_in), "r");
     l->ttyfd = cfg->fd_tty != -1? cfg->fd_tty: l->ifd;
 
 
@@ -895,7 +892,6 @@ void linenoiseCreateState(struct linenoiseState_s **ret, const struct linenoiseC
 
 
 void linenoiseDeleteState(linenoiseState l) {
-    fclose(l->ifd_file);
     free(l);
 }
 
@@ -1205,19 +1201,23 @@ static char *linenoiseNoTTY(struct linenoiseState_s *l) {
                 return NULL;
             }
         }
-        int c = fgetc(l->ifd_file);
-        if (c == 0) {
-            continue;
-        }
-        if (c == EOF || c == '\n') {
-            if (c == EOF && len == 0) {
-                free(line);
-                return NULL;
-            } else {
+        char c;
+        ssize_t ret = read(l->ifd, &c, 1);
+        if (ret == 0 || (ret == -1 && errno == EAGAIN)) {
+            // no bytes left, but no \n is received
+            free(line);
+            return NULL;
+        } else if (ret == -1) {
+            // error cond
+        } else {
+            // char read
+            if (c == 0) {
+                continue;
+            }
+            if (c == '\n') {
                 line[len] = '\0';
                 return line;
             }
-        } else {
             line[len] = c;
             len++;
         }
