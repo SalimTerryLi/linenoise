@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,11 +9,9 @@
 #include <errno.h>
 #include "linenoise.h"
 
-static struct termios orig_term = {};
 
 static void *thread_main(void *arg)
 {
-    int pipe_read = *(int*)arg;
     printf("thread started\n");
 
     for(;;) {
@@ -35,20 +32,11 @@ static void start_thread() {
         printf("pthread_attr_init() failed: %s\n", strerror(errno));
     }
 
-    int thread_pipe[2];
-    ret = pipe(thread_pipe);
     if (ret != 0) {
         printf("pipe() failed: %s\n", strerror(errno));
     }
 
-    // read end non-blocking
-    ret = fcntl(thread_pipe[0], F_SETFL, fcntl(thread_pipe[0], F_GETFL, 0) | O_NONBLOCK);
-    if (ret != 0) {
-        printf("fcntl() failed: %s\n", strerror(errno));
-    }
-    int pipe_write = thread_pipe[1];
-
-    ret = pthread_create(&task_to_be_cancelled_hdl, &attr, &thread_main, thread_pipe);
+    ret = pthread_create(&task_to_be_cancelled_hdl, &attr, &thread_main, NULL);
     if (ret != 0) {
         printf("pthread_create() failed: %s\n", strerror(errno));
     }
@@ -89,6 +77,7 @@ int main(int argc, char **argv) {
     int piped_stdout[2];
     pipe(piped_stdout);
     dup2(piped_stdout[1], STDOUT_FILENO);
+    fcntl(piped_stdout[0], F_SETFL, fcntl(piped_stdout[0], F_GETFL, 0) | O_NONBLOCK);
 
     linenoiseState ls;
     char buf[1024];
@@ -140,9 +129,21 @@ int main(int argc, char **argv) {
                 if (fds[1].revents & POLLIN) {
                     linenoiseHide(ls);
                     // always copy amount of bytes blindly
-                    splice(piped_stdout[0], NULL, orig_stdout, NULL, 4096, SPLICE_F_NONBLOCK);
+                    for(;;) {
+                        char tmpbuf[256];
+                        ssize_t readlen = read(piped_stdout[0], tmpbuf, sizeof(tmpbuf));
+                        if (readlen == 0 || (readlen == -1 && errno == EAGAIN)) {
+                            break;
+                        } else if (readlen == -1) {
+                            dprintf(2, "ERROR: read() failed: %s\n", strerror(errno));
+                        }
+                        ssize_t writelen = write(orig_stdout, tmpbuf, readlen);
+                        if (readlen != writelen) {
+                            dprintf(2, "ERROR: write() returned %zd, errno: %s\n", writelen, strerror(errno));
+                        }
+                        fsync(orig_stdout);
+                    }
                     linenoiseShow(ls);
-                    continue;
                 }
                 if (fds[0].revents & POLLIN) {
                     line = linenoiseEditFeed(ls);
