@@ -727,7 +727,7 @@ void linenoiseHide(struct linenoiseState_s *l) {
 
 /* Show the current line, when using the multiplexing API. */
 void linenoiseShow(struct linenoiseState_s *l) {
-    enableRawMode(l, l->ifd);
+    enableRawMode(l, l->ttyfd);
     if (l->in_completion) {
         refreshLineWithCompletion(l,NULL,REFRESH_WRITE);
     } else {
