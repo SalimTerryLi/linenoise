@@ -79,6 +79,15 @@ int main(int argc, char **argv) {
     dup2(piped_stdout[1], STDOUT_FILENO);
     fcntl(piped_stdout[0], F_SETFL, fcntl(piped_stdout[0], F_GETFL, 0) | O_NONBLOCK);
 
+    // manually change the associated stdout FILE pointer
+    // so that it does not buffer in block mode, which
+    // results in no immediate output when the stdout of
+    // the process is a pipe instead of a tty.
+    // because printf() uses fprintf() instead of dprintf() in libc
+    setvbuf(stdout, NULL, _IOLBF, 4096);
+    // and do an immediate flush (in case something is already written by thread)
+    fflush(stdout);
+
     linenoiseState ls;
     char buf[1024];
     struct linenoiseConfig cfg = {
