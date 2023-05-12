@@ -240,7 +240,8 @@ static int enableRawMode(struct linenoiseState_s *ls, int fd) {
     if (!isatty(fd)) goto fatal;
     if (tcgetattr(fd,&ls->orig_termios) == -1) goto fatal;
 
-    raw = ls->orig_termios;  /* modify the original mode */
+    memcpy(&raw, &ls->orig_termios, sizeof(raw));   /* modify the original mode */
+
     /* input modes: no break, no CR to NL, no parity check, no strip char,
      * no start/stop output control. */
     raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
