@@ -7,6 +7,8 @@ add_library(linenoise
     linenoise.c
 )
 
+target_compile_options(linenoise PRIVATE "-fsigned-char")
+
 target_include_directories(linenoise PUBLIC
     .
 )
